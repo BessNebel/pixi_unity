@@ -6,123 +6,102 @@ using UnityEngine.UI;
 
 using TMPro;
 
-public class Exporter : MonoBehaviour
+public class Exporter
 {
-  private const string ExportFolder = "Export/";
-  private const string ExportImagesFolder = "images/";
-  private const string ExportAssetsFolder = "assets/";
-  private const string SourceFolder = "Assets/Images/";
-
-  private List<string> Classes = new List<string>();
-
-  private void Start()
+  public static Dictionary<string, string> Export(GameObject objectToExport)
   {
-    var images = new List<string>();
-    images.Add("export const images = [");
+    var node = GatherNodes(objectToExport);
 
-    string[] pathes = Directory.GetFiles(SourceFolder, "*.png", SearchOption.AllDirectories);
-    foreach (var path in pathes)
-    {
-      var file = path.Substring(SourceFolder.Length);
-      File.Copy(path, ExportFolder + ExportImagesFolder + file, true);
+    var export = ExportNodes(node, new Dictionary<string, string>());
 
-      images.Add($"\t\"{ExportImagesFolder}{file}\",");
-    }
-
-    images.Add("];");
-
-    StreamWriter imagesWriter = new StreamWriter(ExportFolder + ExportAssetsFolder + "Images.ts", false);
-    imagesWriter.WriteLine(string.Join("\n", images));
-    imagesWriter.Close();
-
-    var node = GatherNodes(gameObject);
-
-    var imports = new string[] {
-      "import UISprite from './UI/UISprite';",
-      "import UIPopup from './UI/UIPopup';",
-      "import UILabel from './UI/UILabel';",
-      "import UIButton from './UI/UIButton';"
-    };
-
-    var export = ExportNodes(node, string.Join("\n", imports));
-
-    StreamWriter exportWriter = new StreamWriter(ExportFolder + ExportAssetsFolder + gameObject.name + ".ts", false);
-    exportWriter.WriteLine(export);
+    StreamWriter exportWriter = new StreamWriter(ExportController.ExportFolder + ExportController.ExportAssetsFolder + objectToExport.name + ".ts", false);
+    exportWriter.WriteLine(string.Join("\n", ExportController.imports)  + "\nimport * as SC from './SupportClasses';\n" + export[objectToExport.name]);
     exportWriter.Close();
+
+    export.Remove(objectToExport.name);
+
+    return export;
   }
 
-  private string ExportNodes(ExporterNode node, string export = "")
+  private static Dictionary<string, string> ExportNodes(ExporterNode node, Dictionary<string, string> Classes)
   {
-    if (node.Children.Count == 0 || Classes.IndexOf(node.ClassName) >= 0)
+    if (node.Children.Count == 0 || Classes.ContainsKey(node.ClassName))
     {
-      return export;
+      return Classes;
     }
 
-    Classes.Add(node.ClassName);
-
-    var exportUnit = $"{node.GetDefinition()} extends {node.Type} {{";
+    var nodeClass = $"\n{node.GetDefinition()} extends {node.Type} {{";
 
     var additionalParameters = new List<string>();
     var constructorBody = new List<string>();
 
     foreach (var child in node.Children)
     {
-      exportUnit += $"\n\tpublic {child.Name}: {child.ClassName}";
+      nodeClass += $"\n\tpublic {child.Name}: ";
+      var childName = child.Name;
 
       if (node.Parent == "Canvas")
       {
         if (child.Children.Count == 0)
         {
-          exportUnit += $" = new {child.ClassName }({child.InitParameters})";
+          nodeClass += $"{child.ClassName} = new {child.ClassPrefix}{child.ClassName}({child.InitParameters})";
+        }
+        else
+        {
+          nodeClass += $"{child.ClassPrefix}{child.ClassName}";
         }
 
         constructorBody.Add(GenerateChildInit(child));
+        childName += child.Id;
       }
       else
       {
+        nodeClass += $"{child.ClassName}";
         additionalParameters.Add($"{child.Name}: {child.ClassName}");
       }
 
-      exportUnit += ';';
-      constructorBody.Add($"\n\t\tthis.{child.Name} = {child.Name};");
+      nodeClass += ';';
+      constructorBody.Add($"\n\t\tthis.{child.Name} = {childName};");
       constructorBody.Add($"\t\tthis.addChild(this.{child.Name});");
     }
 
     var template = ExporterNode.ConstructorTemplates[node.Type.ToString()];
     template = template.Replace("<<ADDITIONAL_PARAMETERS>>", $", {string.Join(", ", additionalParameters)}");
-    exportUnit += template.Replace("<CONSTRUCTOR_BODY>", string.Join("\n", constructorBody));
-    exportUnit += "\n}";
-    export += "\n\n" + exportUnit;
+    nodeClass += template.Replace("<CONSTRUCTOR_BODY>", string.Join("\n", constructorBody));
+    nodeClass += "\n}";
+
+    Classes.Add(node.ClassName, nodeClass);
 
     foreach (var child in node.Children)
     {
-      export = ExportNodes(child, export);
+      ExportNodes(child, Classes);
     }
 
-    return export;
+    return Classes;
   }
 
-  private string GenerateChildInit(ExporterNode node)
+  private static string GenerateChildInit(ExporterNode node)
   {
     var childInit = "";
     var childsOfChild = new List<string>();
 
     foreach (var child in node.Children)
     {
-      childsOfChild.Add(child.Name);
+      childsOfChild.Add($"{child.Name}{child.Id}");
       childInit += GenerateChildInit(child);
     }
 
-    childInit += $"\n\t\tconst {node.Name} = new {node.ClassName}({node.InitParameters}, {string.Join(", ", childsOfChild)});";
+    childInit += $"\n\t\tconst {node.Name}{node.Id} = new {node.ClassPrefix}{node.ClassName}({node.InitParameters}, {string.Join(", ", childsOfChild)});";
 
     return childInit;
   }
 
-  private ExporterNode GatherNodes(GameObject go, ExporterNode parent = null)
+  private static ExporterNode GatherNodes(GameObject go, ExporterNode parent = null)
   {
     var node = new ExporterNode();
     var position = GetCoords(go);
 
+    node.Id = ExportController.Instance.GetNodeId();
     node.Name = go.name;
     node.Parent = go.transform.parent.name;
     node.x = position.x;
@@ -147,7 +126,7 @@ public class Exporter : MonoBehaviour
         node.Type = ExporterNode.NodeType.UISprite;
       }
 
-      node.InitParameters = $"\"{ExportImagesFolder}{image.sprite.name}.png\", {node.x}, {node.y}";
+      node.InitParameters = $"\"{ExportController.ExportImagesFolder}{image.sprite.name}.png\", {node.x}, {node.y}";
     }
 
     var text = go.GetComponent<TextMeshProUGUI>();
@@ -170,7 +149,7 @@ public class Exporter : MonoBehaviour
     return node;
   }
 
-  private Vector2 GetCoords(GameObject go)
+  private static Vector2 GetCoords(GameObject go)
   {
     var parentRectTransform = go.transform.parent.GetComponent<RectTransform>();
     var childRectTransform = go.GetComponent<RectTransform>();

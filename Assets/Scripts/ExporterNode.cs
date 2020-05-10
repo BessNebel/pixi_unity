@@ -17,8 +17,10 @@ public class ExporterNode
     Unknown
   };
 
+  public int Id = 0;
   public string Name = "Unnamed";
   public string ClassName = "Unnamed";
+  public string ClassPrefix = "";
   public float x = 0;
   public float y = 0;
   public string Parent = "";
@@ -28,12 +30,13 @@ public class ExporterNode
 
   public string GetDefinition()
   {
+    var modificator = "";
     if (Type == NodeType.UIPopup)
     {
-      return $"export default class {ClassName}";
+      modificator = "default";
     }
 
-    return "class " + ClassName;
+    return $"export {modificator} class {ClassName}";
   }
 
   public void GenerateClassName()
@@ -52,6 +55,11 @@ public class ExporterNode
       {
         parts.Add(child.Name);
         parts.Add(child.Type.ToString());
+      }
+
+      if (Children.Count > 0)
+      {
+        ClassPrefix = "SC.";
       }
 
       ClassName += string.Join("", parts);
