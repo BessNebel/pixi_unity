@@ -8,102 +8,71 @@ using TMPro;
 
 public class Exporter
 {
-  public static Dictionary<string, string> Export(GameObject objectToExport)
-  {
-    var node = GatherNodes(objectToExport);
+  public static string[] imports = {
+      "import UISprite from './UI/UISprite';",
+      "import UIPopup from './UI/UIPopup';",
+      "import UILabel from './UI/UILabel';",
+      "import UIButton from './UI/UIButton';"
+    };
 
-    var export = ExportNodes(node, new Dictionary<string, string>());
+  public static void Export(GameObject objectToExport)
+  {
+    var node = GatherInfo(objectToExport);
+    var export = GenerateClass(node);
 
     StreamWriter exportWriter = new StreamWriter(ExportController.ExportFolder + ExportController.ExportAssetsFolder + objectToExport.name + ".ts", false);
-    exportWriter.WriteLine(string.Join("\n", ExportController.imports)  + "\nimport * as SC from './SupportClasses';\n" + export[objectToExport.name]);
+    exportWriter.WriteLine(string.Join("\n", imports) + "\n\n" + export);
     exportWriter.Close();
-
-    export.Remove(objectToExport.name);
-
-    return export;
   }
 
-  private static Dictionary<string, string> ExportNodes(ExporterNode node, Dictionary<string, string> Classes)
+  private static string GenerateClass(ExporterNode node, int deepth = 0)
   {
-    if (node.Children.Count == 0 || Classes.ContainsKey(node.ClassName))
+    var lines = new List<string>();
+
+    if (deepth == 0)
     {
-      return Classes;
+      lines.Add($"export default class {node.Name} extends {node.Type} {{");
     }
 
-    var nodeClass = $"\n{node.GetDefinition()} extends {node.Type} {{";
-
-    var additionalParameters = new List<string>();
     var constructorBody = new List<string>();
+    var deepthTab = new string('\t', deepth);
 
     foreach (var child in node.Children)
     {
-      nodeClass += $"\n\tpublic {child.Name}: ";
-      var childName = child.Name;
-
-      if (node.Parent == "Canvas")
+      if (child.Children.Count == 0)
       {
-        if (child.Children.Count == 0)
-        {
-          nodeClass += $"{child.ClassName} = new {child.ClassPrefix}{child.ClassName}({child.InitParameters})";
-        }
-        else
-        {
-          nodeClass += $"{child.ClassPrefix}{child.ClassName}";
-        }
-
-        constructorBody.Add(GenerateChildInit(child));
-        childName += child.Id;
+        lines.Add($"{deepthTab}\tpublic {child.Name} = new {child.Type}({child.InitParameters});");
       }
       else
       {
-        nodeClass += $"{child.ClassName}";
-        additionalParameters.Add($"{child.Name}: {child.ClassName}");
+        lines.Add($"{deepthTab}\tpublic {child.Name} = new class extends {child.Type} {{");
+        lines.Add(GenerateClass(child, deepth + 1));
+        lines.Add($"{deepthTab}\t}}");
       }
 
-      nodeClass += ';';
-      constructorBody.Add($"\n\t\tthis.{child.Name} = {childName};");
-      constructorBody.Add($"\t\tthis.addChild(this.{child.Name});");
+      constructorBody.Add($"{deepthTab}\t\tthis.addChild(this.{child.Name});");
     }
 
-    var template = ExporterNode.ConstructorTemplates[node.Type.ToString()];
-    template = template.Replace("<<ADDITIONAL_PARAMETERS>>", $", {string.Join(", ", additionalParameters)}");
-    nodeClass += template.Replace("<CONSTRUCTOR_BODY>", string.Join("\n", constructorBody));
-    nodeClass += "\n}";
+    lines.Add($"{deepthTab}\tconstructor() {{");
+    lines.Add($"{deepthTab}\t\tsuper({node.InitParameters});");
+    lines.Add(string.Join("\n", constructorBody));
+    lines.Add($"{deepthTab}\t}}");
 
-    Classes.Add(node.ClassName, nodeClass);
-
-    foreach (var child in node.Children)
+    if (deepth == 0)
     {
-      ExportNodes(child, Classes);
+      lines.Add("}");
     }
 
-    return Classes;
+    return string.Join("\n", lines);
   }
 
-  private static string GenerateChildInit(ExporterNode node)
-  {
-    var childInit = "";
-    var childsOfChild = new List<string>();
-
-    foreach (var child in node.Children)
-    {
-      childsOfChild.Add($"{child.Name}{child.Id}");
-      childInit += GenerateChildInit(child);
-    }
-
-    childInit += $"\n\t\tconst {node.Name}{node.Id} = new {node.ClassPrefix}{node.ClassName}({node.InitParameters}, {string.Join(", ", childsOfChild)});";
-
-    return childInit;
-  }
-
-  private static ExporterNode GatherNodes(GameObject go, ExporterNode parent = null)
+  private static ExporterNode GatherInfo(GameObject go, ExporterNode parent = null)
   {
     var node = new ExporterNode();
     var position = GetCoords(go);
 
     node.Id = ExportController.Instance.GetNodeId();
     node.Name = go.name;
-    node.Parent = go.transform.parent.name;
     node.x = position.x;
     node.y = position.y;    
 
@@ -111,7 +80,7 @@ public class Exporter
     if (popup != null)
     {
       node.Type = ExporterNode.NodeType.UIPopup;
-      node.InitParameters = $"\"\", {node.x}, {node.y}";
+      node.InitParameters = $"{node.x}, {node.y}";
     }
 
     var image = go.GetComponent<Image>();
@@ -141,10 +110,8 @@ public class Exporter
 
     for (var childIndex = 0; childIndex < go.transform.childCount; childIndex++)
     {
-      node.Children.Add(GatherNodes(go.transform.GetChild(childIndex).gameObject, node));
+      node.Children.Add(GatherInfo(go.transform.GetChild(childIndex).gameObject, node));
     }
-
-    node.GenerateClassName();
 
     return node;
   }

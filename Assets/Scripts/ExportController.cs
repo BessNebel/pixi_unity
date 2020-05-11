@@ -7,13 +7,6 @@ public class ExportController : MonoBehaviour
 {
   public static ExportController Instance = null;
 
-  public static string[] imports = {
-      "import UISprite from './UI/UISprite';",
-      "import UIPopup from './UI/UIPopup';",
-      "import UILabel from './UI/UILabel';",
-      "import UIButton from './UI/UIButton';"
-    };
-
   public const string ExportFolder = "Export/";
   public const string ExportImagesFolder = "images/";
   public const string ExportAssetsFolder = "assets/";
@@ -56,23 +49,13 @@ public class ExportController : MonoBehaviour
     imagesWriter.WriteLine(string.Join("\n", images));
     imagesWriter.Close();
 
-    var supportClasses = new Dictionary<string, string>();
-
     for (var childIndex = 0; childIndex < gameObject.transform.childCount; childIndex++)
     {
-      var classes = Exporter.Export(gameObject.transform.GetChild(childIndex).gameObject);
-
-      foreach (var className in classes.Keys)
+      var child = gameObject.transform.GetChild(childIndex).gameObject;
+      if (child.activeSelf)
       {
-        if (!supportClasses.ContainsKey(className))
-        {
-          supportClasses.Add(className, classes[className]);
-        }
+        Exporter.Export(child);
       }
     }
-
-    StreamWriter exportWriter = new StreamWriter(ExportFolder + ExportAssetsFolder + "SupportClasses.ts", false);
-    exportWriter.WriteLine(string.Join("\n", imports) + "\n" +  string.Join("\n", supportClasses.Values));
-    exportWriter.Close();
   }
 }
